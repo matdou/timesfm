@@ -270,14 +270,15 @@ class MultiHeadAttention(nn.Module):
     if decode_cache is not None:
       _, decode_cache_size, _, _ = decode_cache.value.shape
 
-      start = decode_cache.next_index[0]
-      end = start + n_patches
+      # Scatter the new key/value into the cache by index rather than a
+      # data-dependent slice. A slice bound read from a tensor forces a
+      # .item() sync, which breaks the torch.compile graph at every layer.
+      cache_index = (
+        torch.arange(n_patches, device=key.device) + decode_cache.next_index[0]
+      )
 
-      # Perform a single, vectorized slice assignment for the entire batch.
-      # This is vastly more efficient than a Python for-loop.
-
-      decode_cache.key[:, start:end] = key
-      decode_cache.value[:, start:end] = value
+      decode_cache.key.index_copy_(1, cache_index, key)
+      decode_cache.value.index_copy_(1, cache_index, value)
 
       key = decode_cache.key
       value = decode_cache.value
